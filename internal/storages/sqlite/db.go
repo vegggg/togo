@@ -3,6 +3,7 @@ package sqllite
 import (
 	"context"
 	"database/sql"
+	"log"
 
 	"github.com/manabie-com/togo/internal/storages"
 )
@@ -38,6 +39,23 @@ func (l *LiteDB) RetrieveTasks(ctx context.Context, userID, createdDate sql.Null
 	return tasks, nil
 }
 
+// ValidateUserMaxTodo returns true if user is allowed to create new task
+func (l *LiteDB) ValidateUserMaxTodo(ctx context.Context, userID, createdDate sql.NullString) bool {
+	stmt := `SELECT id FROM users WHERE 
+		max_todo > (SELECT COUNT(id) FROM tasks WHERE user_id = ? AND created_date = ?)`
+	log.Println("input", userID.String, createdDate.String)
+	row := l.DB.QueryRowContext(ctx, stmt, userID, createdDate)
+	u := &storages.User{}
+
+	err := row.Scan(&u.ID)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+
+	return true
+}
+
 // AddTask adds a new task to DB
 func (l *LiteDB) AddTask(ctx context.Context, t *storages.Task) error {
 	stmt := `INSERT INTO tasks (id, content, user_id, created_date) VALUES (?, ?, ?, ?)`
@@ -55,6 +73,17 @@ func (l *LiteDB) ValidateUser(ctx context.Context, userID, pwd sql.NullString) b
 	row := l.DB.QueryRowContext(ctx, stmt, userID, pwd)
 	u := &storages.User{}
 	err := row.Scan(&u.ID)
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
+// CreateUser create new user
+func (l *LiteDB) CreateUser(ctx context.Context, userID, pwd sql.NullString, maxTodo sql.NullInt32) bool {
+	stmt := `INSERT INTO users (id, password, max_todo) VALUES(?, ?, ?)`
+	_, err := l.DB.ExecContext(ctx, stmt, userID, pwd, maxTodo)
 	if err != nil {
 		return false
 	}
