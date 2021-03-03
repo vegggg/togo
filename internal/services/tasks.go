@@ -121,9 +121,28 @@ func (s *ToDoService) addTask(resp http.ResponseWriter, req *http.Request) {
 
 	resp.Header().Set("Content-Type", "application/json")
 
+	isAddable := s.Store.ValidateUserMaxTodo(
+		req.Context(),
+		sql.NullString{
+			String: userID,
+			Valid:  true,
+		},
+		sql.NullString{
+			String: t.CreatedDate,
+			Valid:  true,
+		},
+	)
+	if isAddable == false {
+		resp.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(resp).Encode(map[string]string{
+			"error": "number of tasks exceeded limit",
+		})
+		return
+	}
+
 	err = s.Store.AddTask(req.Context(), t)
 	if err != nil {
-		resp.WriteHeader(http.StatusInternalServerError)
+		resp.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(resp).Encode(map[string]string{
 			"error": err.Error(),
 		})
@@ -145,7 +164,7 @@ func value(req *http.Request, p string) sql.NullString {
 func (s *ToDoService) createToken(id string) (string, error) {
 	atClaims := jwt.MapClaims{}
 	atClaims["user_id"] = id
-	atClaims["exp"] = time.Now().Add(time.Minute * 15).Unix()
+	atClaims["exp"] = time.Now().Add(time.Hour * 3).Unix()
 	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
 	token, err := at.SignedString([]byte(s.JWTKey))
 	if err != nil {
