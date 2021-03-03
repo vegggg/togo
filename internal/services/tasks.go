@@ -11,13 +11,13 @@ import (
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/google/uuid"
 	"github.com/manabie-com/togo/internal/storages"
-	sqllite "github.com/manabie-com/togo/internal/storages/sqlite"
+	sql_helper "github.com/manabie-com/togo/internal/storages/sql"
 )
 
 // ToDoService implement HTTP server
 type ToDoService struct {
 	JWTKey string
-	Store  *sqllite.LiteDB
+	Store  *sql_helper.Helper
 }
 
 func (s *ToDoService) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
@@ -32,6 +32,11 @@ func (s *ToDoService) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	switch req.URL.Path {
+	case "/users":
+		if req.Method == http.MethodPost {
+			s.createUser(resp, req)
+		}
+		return
 	case "/login":
 		s.getAuthToken(resp, req)
 		return
@@ -171,6 +176,44 @@ func (s *ToDoService) createToken(id string) (string, error) {
 		return "", err
 	}
 	return token, nil
+}
+
+func (s *ToDoService) createUser(resp http.ResponseWriter, req *http.Request) {
+	u := &storages.User{}
+	err := json.NewDecoder(req.Body).Decode(u)
+	defer req.Body.Close()
+	if u.MaxTodo == 0 {
+		u.MaxTodo = defaultMaxToDo
+	}
+
+	if err != nil {
+		resp.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	ok := s.Store.CreateUser(req.Context(), u)
+	if !ok {
+		resp.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(resp).Encode(map[string]string{
+			"error": "can not create user",
+		})
+		return
+	}
+	atClaims := jwt.MapClaims{}
+	atClaims["user_id"] = u.ID
+	atClaims["exp"] = time.Now().Add(time.Hour * 3).Unix()
+	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
+	token, err := at.SignedString([]byte(s.JWTKey))
+	if err != nil {
+		resp.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(resp).Encode(map[string]string{
+			"error": "internal error",
+		})
+		return
+	}
+	json.NewEncoder(resp).Encode(map[string]string{
+		"data": token,
+	})
 }
 
 func (s *ToDoService) validToken(req *http.Request) (*http.Request, bool) {

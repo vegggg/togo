@@ -1,4 +1,4 @@
-package sqllite
+package sql
 
 import (
 	"context"
@@ -8,14 +8,15 @@ import (
 	"github.com/manabie-com/togo/internal/storages"
 )
 
-// LiteDB for working with sqllite
-type LiteDB struct {
-	DB *sql.DB
+// Helper for working with sqllite
+type Helper struct {
+	DB   *sql.DB
+	Stmt Stmt
 }
 
 // RetrieveTasks returns tasks if match userID AND createDate.
-func (l *LiteDB) RetrieveTasks(ctx context.Context, userID, createdDate sql.NullString) ([]*storages.Task, error) {
-	stmt := `SELECT id, content, user_id, created_date FROM tasks WHERE user_id = ? AND created_date = ?`
+func (l *Helper) RetrieveTasks(ctx context.Context, userID, createdDate sql.NullString) ([]*storages.Task, error) {
+	stmt := l.Stmt.RetrieveTasks
 	rows, err := l.DB.QueryContext(ctx, stmt, userID, createdDate)
 	if err != nil {
 		return nil, err
@@ -40,10 +41,8 @@ func (l *LiteDB) RetrieveTasks(ctx context.Context, userID, createdDate sql.Null
 }
 
 // ValidateUserMaxTodo returns true if user is allowed to create new task
-func (l *LiteDB) ValidateUserMaxTodo(ctx context.Context, userID, createdDate sql.NullString) bool {
-	stmt := `SELECT id FROM users WHERE 
-		max_todo > (SELECT COUNT(id) FROM tasks WHERE user_id = ? AND created_date = ?)`
-	log.Println("input", userID.String, createdDate.String)
+func (l *Helper) ValidateUserMaxTodo(ctx context.Context, userID, createdDate sql.NullString) bool {
+	stmt := l.Stmt.ValidateUserMaxTodo
 	row := l.DB.QueryRowContext(ctx, stmt, userID, createdDate)
 	u := &storages.User{}
 
@@ -57,8 +56,8 @@ func (l *LiteDB) ValidateUserMaxTodo(ctx context.Context, userID, createdDate sq
 }
 
 // AddTask adds a new task to DB
-func (l *LiteDB) AddTask(ctx context.Context, t *storages.Task) error {
-	stmt := `INSERT INTO tasks (id, content, user_id, created_date) VALUES (?, ?, ?, ?)`
+func (l *Helper) AddTask(ctx context.Context, t *storages.Task) error {
+	stmt := l.Stmt.AddTask
 	_, err := l.DB.ExecContext(ctx, stmt, &t.ID, &t.Content, &t.UserID, &t.CreatedDate)
 	if err != nil {
 		return err
@@ -68,12 +67,13 @@ func (l *LiteDB) AddTask(ctx context.Context, t *storages.Task) error {
 }
 
 // ValidateUser returns tasks if match userID AND password
-func (l *LiteDB) ValidateUser(ctx context.Context, userID, pwd sql.NullString) bool {
-	stmt := `SELECT id FROM users WHERE id = ? AND password = ?`
+func (l *Helper) ValidateUser(ctx context.Context, userID, pwd sql.NullString) bool {
+	stmt := l.Stmt.ValidateUser
 	row := l.DB.QueryRowContext(ctx, stmt, userID, pwd)
 	u := &storages.User{}
 	err := row.Scan(&u.ID)
 	if err != nil {
+		log.Println(err)
 		return false
 	}
 
@@ -81,9 +81,10 @@ func (l *LiteDB) ValidateUser(ctx context.Context, userID, pwd sql.NullString) b
 }
 
 // CreateUser create new user
-func (l *LiteDB) CreateUser(ctx context.Context, userID, pwd sql.NullString, maxTodo sql.NullInt32) bool {
-	stmt := `INSERT INTO users (id, password, max_todo) VALUES(?, ?, ?)`
-	_, err := l.DB.ExecContext(ctx, stmt, userID, pwd, maxTodo)
+func (l *Helper) CreateUser(ctx context.Context, u *storages.User) bool {
+	stmt := l.Stmt.CreateUser
+	log.Println("create user", u.ID, u.Password)
+	_, err := l.DB.ExecContext(ctx, stmt, &u.ID, &u.Password, &u.MaxTodo)
 	if err != nil {
 		return false
 	}
